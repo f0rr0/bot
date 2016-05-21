@@ -11,7 +11,7 @@ import firebase from 'firebase';
 const getParams = (params) => {
   const defaultParams = {
     user: 'sidjain26',
-		format: 'json',
+		format: 'json'
   };
   return params ? R.merge(defaultParams, params) : defaultParams;
 };
@@ -22,7 +22,7 @@ const spotify_client = (() => {
     authorizationUrl: 'https://accounts.spotify.com/api/token',
     searchResultLimit: 5,
     searchUrl: 'https://api.spotify.com/v1/search',
-    timeout: 3000,
+    timeout: 3000
   };
   const merged_params = R.merge(secrets, params);
   return spotifier(merged_params);
@@ -30,7 +30,7 @@ const spotify_client = (() => {
 
 firebase.initializeApp({
   serviceAccount: './secrets/firebase-config.json',
-  databaseURL: 'https://web-bot-e8aee.firebaseio.com',
+  databaseURL: 'https://web-bot-e8aee.firebaseio.com'
 });
 
 /* LIBRARY FUNCTIONS*/
