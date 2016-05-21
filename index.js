@@ -17,7 +17,7 @@ const getParams = (params) => {
 };
 
 const spotify_client = (() => {
-	const secrets = jsonfile.readFileSync("secrets/spotify-config.json");
+	const secrets = jsonfile.readFileSync("./secrets/spotify-config.json");
 	const params = {
 		searchResultLimit: 5,
 		searchUrl: 'https://api.spotify.com/v1/search',
