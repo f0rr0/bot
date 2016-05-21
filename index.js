@@ -11,7 +11,7 @@ import firebase from 'firebase';
 const getParams = (params) => {
   const defaultParams = {
     user: 'sidjain26',
-				format: 'json',
+		format: 'json',
   };
   return params ? R.merge(defaultParams, params) : defaultParams;
 };
