@@ -10,6 +10,7 @@
   "license": "ISC",
   "dependencies": {
     "curryfm": "0.0.6",
+    "firebase": "^3.0.2",
     "jsonfile": "^2.3.0",
     "moment": "^2.13.0",
     "ramda": "^0.21.0",

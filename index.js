@@ -4,15 +4,32 @@ import moment from 'moment';
 import curryfm from 'curryfm';
 import jsonfile from 'jsonfile';
 import spotifier from 'spotifier';
-const _ = R.__;
+import firebase from 'firebase';
 
-const spotifyClient = spotifier({
-	authorizationUrl: 'https://accounts.spotify.com/api/token',
-	clientId: '09db4769108945c8834a8cbf9eb2cb2e',
-	clientSecret: 'c97cc1f959334126b1c2623ff4da23c0',
-	searchResultLimit: 10,
-	searchUrl: 'https://api.spotify.com/v1/search',
-	timeout: 3000
+/* API INITIALIZERS */
+
+const getParams = (params) => {
+	const defaultParams = {
+		user: "sidjain26",
+		format: "json"
+	}
+	return params ? R.merge(defaultParams, params) : defaultParams;
+};
+
+const spotify_client = (() => {
+	const secrets = jsonfile.readFileSync("secrets/spotify-config.json");
+	const params = {
+		searchResultLimit: 5,
+		searchUrl: 'https://api.spotify.com/v1/search',
+		timeout: 3000
+	};
+	const merged_params = R.merge(secrets, params);
+	return spotifier(merged_params);
+})();
+
+firebase.initializeApp({
+	serviceAccount: "./secrets/firebase-config.json",
+	databaseURL: "https://web-bot-e8aee.firebaseio.com"
 });
 
 /* LIBRARY FUNCTIONS*/
@@ -31,36 +48,6 @@ const getKey = (or, path) => {
 	};
 };
 
-const spotifyInfo = R.curry((client, track) => {
-			const {
-				title,
-				artist
-			} = track;
-			let info = {};
-			client.findBestMatch({
-						title,
-						artist
-					}, (err, result) => {
-						if (err) {
-							console.log(err);
-						} else if (result) {
-							const spotify_id = getKey(undefined, ["id"])(result);
-							const spotify_url = getKey(undefined, ["external_urls", "spotify"])(result);
-							const spotify_embed = `https://embed.spotify.com/?uri=${encodeURIComponent(`spotify:track:${spotify_id}`)}`;
-		info = {
-			spotify_id,
-			spotify_url,
-			spotify_embed
-		};
-		console.log(info);
-	}
-	});
-	console.log(info);
-	return R.merge(info, track);
-});
-
-
-
 // const getKeys = (pathsWithDefaults) => {
 // 	const paths = R.keys(pathsWithDefaults);
 // 	const getPaths = (path) => {
@@ -75,7 +62,52 @@ const spotifyInfo = R.curry((client, track) => {
 // 	}
 // }
 
-/* API FUNCTIONS */
+/* GETTERS */
+
+const getKeyRecentTracks = getKey([{}], ["recenttracks", "track"]);
+const getKeyTopTracks = getKey([{}], ["toptracks", "track"]);
+const getKeyTopArtists = getKey([{}], ["topartists", "artist"]);
+const getKeyWeeklyTrackChart = getKey([{}], ["weeklytrackchart", "track"]);
+const getKeyWeeklyArtistChart = getKey([{}], ["weeklyartistchart", "artist"]);
+const getKeyArtistTracks = getKey([{}], ["artisttracks", "track"]);
+
+/* MANIPULATORS */
+
+const recentTrackInfo = (track) => {
+	const title = getKey(null, ["name"])(track);
+	const artist = getKey(null, ["artist", "#text"])(track);
+	const epoch = getKey(null, ["date", "uts"])(track);
+	const timestamp = epoch ? moment.unix(epoch)
+		.fromNow() : null;
+	const active = getKey(false, ["@attr", "nowplaying"])(track) ? true : false;
+	return {
+		title,
+		artist,
+		epoch,
+		timestamp,
+		active
+	};
+};
+
+const topTrackInfo = (track) => {
+	const title = getKey(null, ["name"])(track);
+	const artist = getKey(null, ["artist", "name"])(track);
+	const playcount = getKey(null, ["playcount"])(track);
+	const rank = getKey(null, ["@attr", "rank"])(track);
+	return {
+		title,
+		artist,
+		playcount,
+		rank
+	};
+};
+
+/* TRANSFORMS */
+
+const TransformRecentTracks = R.compose(R.map(recentTrackInfo), getKeyRecentTracks);
+const TransformTopTracks = R.compose(R.map(topTrackInfo), getKeyTopTracks);
+
+/* CURRYFM HELPERS */
 
 const userApi = curryfm("a3123e138236b93c22e6dafa83e355b0", "user");
 const getRecentTracks = userApi("getRecentTracks");
@@ -88,97 +120,120 @@ const getWeeklyTrackChart = userApi("getWeeklyTrackChart");
 const getTracksForArtist = userApi("getArtistTracks");
 const libraryTest = curryfm("a3123e138236b93c22e6dafa83e355b0", "library", "getArtists");
 
+/* SPOTIFY HELPERS */
 
-/* GETTERS */
-
-const getKeyRecentTracks = getKey([{}], ["recenttracks", "track"]);
-const getKeyTopTracks = getKey([{}], ["toptracks", "track"]);
-const getKeyTopArtists = getKey([{}], ["topartists", "artist"]);
-const getKeyWeeklyTrackChart = getKey([{}], ["weeklytrackchart", "track"]);
-const getKeyWeeklyArtistChart = getKey([{}], ["weeklyartistchart", "artist"]);
-const getKeyArtistTracks = getKey([{}], ["artisttracks", "track"]);
-
-/* MANIPULATORS */
-
-
-const trackInfo = (track) => {
-	const title = getKey(null, ["name"])(track);
-	const artist = getKey(getKey(null, ["artist", "#text"])(track), ["artist", "name"])(track);
-	const playcount = getKey(null, ["playcount"])(track);
-	const epoch = getKey(null, ["date", "uts"])(track);
-	const timestamp = epoch ? moment.unix(epoch)
-		.fromNow() : null;
-	const active = getKey(false, ["@attr", "nowplaying"])(track) ? true : false;
-	return {
-		title,
-		artist,
-		playcount,
-		epoch,
-		timestamp,
-		active
+let getSpotifyMetaData = (client, primaryCallback, secondaryCallback, tracks) => {
+	const length = R.length(tracks);
+	let fetched = 0;
+	let spotified_tracks = [];
+	let getData = (primaryCallback, track) => {
+		const { title, artist } = track;
+		client.findBestMatch({ title, artist }, (err, result) => {
+			if (err) {
+				fetched++;
+				// console.log(`Spotified ${fetched} of ${length}. Error :(`);
+				primaryCallback({}, track, spotified_tracks);
+			} else if (result) {
+				const info = extractMetaData(result);
+				fetched++;
+				// console.log(`Spotified ${fetched} of ${length}. Success :)`);
+				primaryCallback(info, track, spotified_tracks);
+			}
+			if (+fetched === +length) {
+				// console.log("\nFin");
+				secondaryCallback(spotified_tracks);
+			}
+		});
 	};
+	getData = R.curry(getData);
+	R.map(getData(primaryCallback), tracks);
 };
+getSpotifyMetaData = R.curry(getSpotifyMetaData);
 
+const extractMetaData = (result) => {
+		const spotify_id = getKey(undefined, ["id"])(result);
+		const spotify_url = getKey(undefined, ["external_urls", "spotify"])(result);
+		const spotify_embed = `https://embed.spotify.com/?uri=${encodeURIComponent(`spotify:track:${spotify_id}`)}`;
+  const spotify_images = getKey(undefined, ["album", "images"])(result);
+  return { spotify_embed, spotify_id, spotify_url, spotify_images };
+}
 
-/* TRANSFORMS */
+const mergeSpotifyMetaDataToTrack = (info, track, spotified_tracks) => {
+  const spotified_track = R.merge(info, track);
+	// console.log(spotified_track);
+  spotified_tracks.push(spotified_track);
+}
 
-const TransformTopTracks = R.compose(R.map(trackInfo), getKeyTopTracks);
-const TransformRecentTracks = R.compose(R.map(trackInfo), getKeyRecentTracks);
+const mergeMetaDataFromSpotifyAnd = getSpotifyMetaData(spotify_client, mergeSpotifyMetaDataToTrack);
 
+/* FIREBASE HELPERS */
+
+const db = firebase.database();
+const top_tracks_monthly_ref = db.ref("toptracks/monthly");
+// ref.orderByChild("rank")
+// 	.on("child_changed", (snapshot) => {
+// 		console.log(snapshot.val());
+// 	}, (err) => {
+// 		console.log(err.code);
+// 	});
+
+const setTracksInFirebase = R.curry((ref, tracks) => {
+	ref.set(tracks);
+});
 
 /* TESTING */
 
-const getParams = (params) => {
-	const defaultParams = {
-		user: "sidjain26",
-		format: "json"
-	}
-	return params ? R.merge(defaultParams, params) : defaultParams;
-};
-const prettyJSON = (space, json) => {
-	return JSON.stringify(json, null, space);
-};
-const prependSpace = (val) => " " + val;
-const nicelyLog = R.compose(console.log, R.curry(prettyJSON)(1));
-const logTopTracks = R.compose(R.map(R.pipe(spotifyInfo(spotifyClient), console.log)), TransformTopTracks);
-const logRecentTracks = R.compose(R.map(console.log), TransformRecentTracks);
-const logTitles = R.compose(console.log, trackInfo);
-const pushToArray = R.curry((array, item) => {
-	array.push(item);
-});
+// const prettyJSON = (space, json) => {
+// 	return JSON.stringify(json, null, space);
+// };
+// const prependSpace = (val) => " " + val;
+// const nicelyLog = R.compose(console.log, R.curry(prettyJSON)(1));
+// const logTopTracks = R.compose(R.map(console.log), TransformTopTracks);
+// const logRecentTracks = R.compose(R.map(console.log), TransformRecentTracks);
+// const logTitles = R.compose(console.log, recentTrackInfo);
+// const pushToArray = R.curry((array, item) => {
+// 	array.push(item);
+// });
 
-const toptracks = [];
-const saveTracks = (response) => {
-	const attr = getKey({}, ["toptracks", "@attr"])(response);
-	console.log("Fetching page " + attr.page);
-	const tracks = getKey({}, ["toptracks", "track"])(response);
-	const getTrackInfo = (track) => {
-		const omitKeys = ["streamable"];
-		return R.omit(omitKeys, track);
-	}
-	const pushToTracks = pushToArray(toptracks);
-	R.map(R.pipe(getTrackInfo, pushToTracks), tracks);
-	if (+attr.page < +attr.totalPages) {
-		getTopTracks({
-			user: "sidjain26",
-			format: "json",
-			limit: 50,
-			page: ++attr.page,
-			period: "overall"
-		}, saveTracks)
-	} else {
-		console.log("Finished fetching...");
-		const file = "./logs/" + moment()
-			.format("MM-DD-YY@HH:mm:ss") + "-TOPTRACKS.JSON";
-		jsonfile.writeFileSync(file, {
-			tracks: toptracks
-		}, {
-			spaces: 2
-		});
-	}
-};
+// const toptracks = [];
+// const saveTracks = (response) => {
+// 	const attr = getKey({}, ["toptracks", "@attr"])(response);
+// 	console.log("Fetching page " + attr.page);
+// 	const tracks = getKey({}, ["toptracks", "track"])(response);
+// 	const getTrackInfo = (track) => {
+// 		const omitKeys = ["streamable", "url", "mbid"];
+// 		return R.omit(omitKeys, track);
+// 	}
+// 	const pushToTracks = pushToArray(toptracks);
+// 	R.map(R.pipe(getTrackInfo, pushToTracks), tracks);
+// 	if (+attr.page < +attr.totalPages) {
+// 		getTopTracks({
+// 			user: "sidjain26",
+// 			format: "json",
+// 			limit: 50,
+// 			page: ++attr.page,
+// 			period: "overall"
+// 		}, saveTracks)
+// 	} else {
+// 		console.log("Finished fetching...");
+// 		const file = "./logs/" + moment()
+// 			.format("MM-DD-YY@HH:mm:ss") + "-TOPTRACKS.JSON";
+// 		jsonfile.writeFileSync(file, {
+// 			tracks: toptracks
+// 		}, {
+// 			spaces: 2
+// 		});
+// 	}
+// };
 
-const callEverySecond = callEvery('00:00:01');
+// const callEverySecond = callEvery('00:00:01');
+
+// callEverySecond(() => {
+// 	ref.push()
+// 		.set({
+// 			hello: "world"
+// 		});
+// });
 
 // {
 // 	"name": "Gemini (feat. George Maple)",
@@ -219,37 +274,27 @@ const callEverySecond = callEvery('00:00:01');
 // 	limit: 5
 // }, logRecentTracks);
 
+// getTopTracks({
+// 	user: "sidjain26",
+// 	format: "json",
+// 	limit: 10,
+// 	page: 1,
+// 	period: "1month"
+// }, uploadTopTracksMonthlyToFirebase)
 
+// getTopArtists({
+// 	user: "sidjain26",
+// 	limit: 10,
+// 	format: "json",
+// 	period: "overall"
+// }, nicelyLog);
 
-getTopTracks({
-	user: "sidjain26",
-	format: "json",
-	limit: 5,
-	page: 1,
-	period: "overall"
-}, logTopTracks)
+// getWeeklyTrackChart({
+// 	user: "sidjain26",
+// 	format: "json",
+// }, R.pipe(getKeyWeeklyTrackChart, R.take(10), R.map(nicelyLog)));
 
-
-/*
-getTopArtists({
-	user: "sidjain26",
-	limit: 10,
-	format: "json",
-	period: "overall"
-}, nicelyLog);
-*/
-
-/*
-getWeeklyTrackChart({
-	user: "sidjain26",
-	format: "json",
-}, R.pipe(getKeyWeeklyTrackChart, R.take(10), R.map(nicelyLog)));
-*/
-
-/*
-getWeeklyArtistChart(getParams(), R.pipe(getKeyWeeklyArtistChart, R.take(10), R.map(nicelyLog)));
-*/
-
+// getWeeklyArtistChart(getParams(), R.pipe(getKeyWeeklyArtistChart, R.take(10), R.map(nicelyLog)));
 
 // getTracksForArtist(getParams({
 // 	artist: "Drake"
@@ -262,43 +307,38 @@ getWeeklyArtistChart(getParams(), R.pipe(getKeyWeeklyArtistChart, R.take(10), R.
 //const uniques = array => Array.from(new Set(array));
 //const uniqueTitles = R.compose(R.indexBy(getKey("name")), getTracks);
 
-/*
-const groupByTitle = R.groupBy((track) => {
-	const title = getKey("name")(track) + getKey("artist", "#text")(track);
-	return title.toLowerCase()
-		.replace(/\s/g, "");
-});
-*/
-/*
-const req = http.get(queryStr, (res) => {
-		let body = '';
-		res.on('data', (chunk) => {
-			body += chunk;
-		});
-		res.on('end', () => {
-			const response = JSON.parse(body);
-			//console.log(getTracks(response));
-			R.map(logTitles, R.slice(0, 10, getTracks(response)));
-			//console.log(groupByTitle(getTracks(response)));
-		});
-	})
-	.on('error', (e) => {
-		console.log(JSON.stringify(e));
-	})
-	.setTimeout(100, () => {
-		req.abort();
-		console.log("Timed out");
-	});
-	*/
-
-// let params = {
-// 	artist: 'drake',
-// 	title: 'fishy'
-// };
-//
-// spotify.findBestMatch(params, function (err, result) {
-// 	if (err) {
-// 		console.error(err);
-// 	}
-// 	console.log(result);
+// const groupByTitle = R.groupBy((track) => {
+// 	const title = getKey("name")(track) + getKey("artist", "#text")(track);
+// 	return title.toLowerCase()
+// 		.replace(/\s/g, "");
 // });
+
+// const req = http.get(queryStr, (res) => {
+// 		let body = '';
+// 		res.on('data', (chunk) => {
+// 			body += chunk;
+// 		});
+// 		res.on('end', () => {
+// 			const response = JSON.parse(body);
+// 			//console.log(getTracks(response));
+// 			R.map(logTitles, R.slice(0, 10, getTracks(response)));
+// 			//console.log(groupByTitle(getTracks(response)));
+// 		});
+// 	})
+// 	.on('error', (e) => {
+// 		console.log(JSON.stringify(e));
+// 	})
+// 	.setTimeout(100, () => {
+// 		req.abort();
+// 		console.log("Timed out");
+// 	});
+
+(() => {
+	getTopTracks(getParams({
+		limit: 20,
+		page: 1,
+		period: "1month"
+	}), (result) => {
+		mergeMetaDataFromSpotifyAnd(setTracksInFirebase(top_tracks_monthly_ref), TransformTopTracks(result));
+	});
+})();
