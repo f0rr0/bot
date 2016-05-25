@@ -4,6 +4,7 @@ import moment from 'moment';
 import curryfm from 'curryfm';
 import jsonfile from 'jsonfile';
 import spotifier from 'spotifier';
+import youtuber from 'youtuber'
 import firebase from 'firebase';
 
 /* API INITIALIZERS */
@@ -32,6 +33,11 @@ firebase.initializeApp({
   serviceAccount: './secrets/firebase-config.json',
   databaseURL: 'https://web-bot-e8aee.firebaseio.com'
 });
+
+const youtube_client = (() => {
+  const secrets = jsonfile.readFileSync('./secrets/youtube-config.json');
+  return youtuber(secrets.api_key);
+})();
 
 /* LIBRARY FUNCTIONS*/
 
@@ -141,7 +147,7 @@ let getSpotifyMetaData = (client, primaryCallback, secondaryCallback, tracks) =>
 				primaryCallback(info, track, spotified_tracks);
 			}
 			if (+fetched === +length) {
-				// console.log("\nFin");
+				// console.log("\nFin.");
 				secondaryCallback(spotified_tracks);
 			}
 		});
@@ -154,24 +160,53 @@ getSpotifyMetaData = R.curry(getSpotifyMetaData);
 
 const extractMetaData = (result) => {
 	const spotify_id = getKey(undefined, ["id"])(result);
-	const spotify_url = getKey(undefined, ["external_urls", "spotify"])(result);
+	const spotify_link = getKey(undefined, ["external_urls", "spotify"])(result);
 	const spotify_embed = `https://embed.spotify.com/?uri=${encodeURIComponent(`spotify:track:${spotify_id}`)}`;
   const spotify_images = getKey(undefined, ["album", "images"])(result);
-  return { spotify_embed, spotify_id, spotify_url, spotify_images };
+  return { spotify_embed, spotify_id, spotify_link, spotify_images };
 }
 
 const mergeSpotifyMetaDataToTrack = (info, track, spotified_tracks) => {
-  const spotified_track = R.merge(info, track);
+  const spotified_track = {
+    ...track,
+    ...info
+  };
 	// console.log(spotified_track);
   spotified_tracks.push(spotified_track);
 }
 
-const mergeMetaDataFromSpotifyAnd = getSpotifyMetaData(spotify_client, mergeSpotifyMetaDataToTrack);
+const mergeSpotifyMetaDataAnd = getSpotifyMetaData(spotify_client, mergeSpotifyMetaDataToTrack);
+
+/* YOUTUBE HELPERS */
+
+let mergeYoutubeMetaDataAnd = R.curry((client, secondaryCallback, tracks) => {
+  const length = R.length(tracks);
+  let fetched = 0;
+  let youtubed_tracks = [];
+  let pushToTracks = (track, err) => {
+    if(err) {
+      fetched++;
+      //console.log(`Youtubeb ${fetched} of ${length}. Error :(`);
+      console.error(JSON.stringify(err, null, 1));
+    }
+    else if (track) {
+      fetched++;
+      //console.log(`Youtubed ${fetched} of ${length}. Success :)`);
+      youtubed_tracks.push(track);
+    }
+    if (fetched === length) {
+      secondaryCallback(youtubed_tracks);
+    }
+  };
+  R.map(client(pushToTracks), tracks);
+});
+mergeYoutubeMetaDataAnd = mergeYoutubeMetaDataAnd(youtube_client);
 
 /* FIREBASE HELPERS */
 
 const db = firebase.database();
 const top_tracks_monthly_ref = db.ref("toptracks/monthly");
+const top_tracks_weekly_ref = db.ref("toptracks/weekly");
 // ref.orderByChild("rank")
 // 	.on("child_changed", (snapshot) => {
 // 		console.log(snapshot.val());
@@ -337,10 +372,17 @@ const setTracksInFirebase = R.curry((ref, tracks) => {
 
 (() => {
 	getTopTracks(getParams({
-		limit: 20,
+		limit: 10,
 		page: 1,
 		period: "1month"
 	}), (result) => {
-		mergeMetaDataFromSpotifyAnd(setTracksInFirebase(top_tracks_monthly_ref), TransformTopTracks(result));
+    mergeSpotifyMetaDataAnd(mergeYoutubeMetaDataAnd(setTracksInFirebase(top_tracks_monthly_ref)), TransformTopTracks(result));
 	});
+  getTopTracks(getParams({
+    limit: 10,
+    page: 1,
+    period: "7day"
+  }), (result) => {
+    mergeSpotifyMetaDataAnd(mergeYoutubeMetaDataAnd(setTracksInFirebase(top_tracks_weekly_ref)))(TransformTopTracks(result));
+  });
 })();
