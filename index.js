@@ -55,20 +55,6 @@ const getKey = (or, path) => {
   };
 };
 
-// const getKeys = (pathsWithDefaults) => {
-// 	const paths = R.keys(pathsWithDefaults);
-// 	const getPaths = (path) => {
-//
-// 	}
-// 	R
-// 	return (obj) => {
-// 		const x = (path) => {
-// 			return getKey(pathsWithDefaults.path, path)(obj);
-// 		}
-// 		return R.map(x, path);
-// 	}
-// }
-
 /* GETTERS */
 
 const getKeyRecentTracks = getKey([{}], ['recenttracks', 'track']);
@@ -133,21 +119,28 @@ let getSpotifyMetaData = (client, primaryCallback, secondaryCallback, tracks) =>
 	const length = R.length(tracks);
 	let fetched = 0;
 	let spotified_tracks = [];
+  const max_retries = 3;
+  let retries = 0;
 	let getData = (primaryCallback, track) => {
 		const { title, artist } = track;
 		client.findBestMatch({ title, artist }, (err, result) => {
 			if (err) {
-				fetched++;
-				// console.log(`Spotified ${fetched} of ${length}. Error :(`);
-				primaryCallback({}, track, spotified_tracks);
+				console.error(track.title, JSON.stringify(err));
+        if (retries < max_retries) {
+          retries++;
+          getData(primaryCallback, track);
+        } else if (retries === max_retries) {
+          retries = 0;
+          fetched++;
+          primaryCallback({}, track, spotified_tracks);
+        }
 			} else if (result) {
+        retries = 0;
+        fetched++;
 				const info = extractMetaData(result);
-				fetched++;
-				// console.log(`Spotified ${fetched} of ${length}. Success :)`);
 				primaryCallback(info, track, spotified_tracks);
 			}
-			if (+fetched === +length) {
-				// console.log("\nFin.");
+			if (fetched === length) {
 				secondaryCallback(spotified_tracks);
 			}
 		});
@@ -171,7 +164,6 @@ const mergeSpotifyMetaDataToTrack = (info, track, spotified_tracks) => {
     ...track,
     ...info
   };
-	// console.log(spotified_track);
   spotified_tracks.push(spotified_track);
 }
 
@@ -183,15 +175,23 @@ let mergeYoutubeMetaDataAnd = R.curry((client, secondaryCallback, tracks) => {
   const length = R.length(tracks);
   let fetched = 0;
   let youtubed_tracks = [];
+  const max_retries = 3;
+  let retries = 0;
   let pushToTracks = (track, err) => {
     if(err) {
-      fetched++;
-      //console.log(`Youtubeb ${fetched} of ${length}. Error :(`);
-      console.error(JSON.stringify(err, null, 1));
+      console.error(track.title, JSON.stringify(err, null, 1));
+      if (retries < max_retries) {
+        retries++;
+        client(pushToTracks, track);
+      } else if (retries === max_retries) {
+        retries = 0;
+        fetched++;
+        youtubed_tracks.push(track);
+      }
     }
     else if (track) {
+      retries = 0;
       fetched++;
-      //console.log(`Youtubed ${fetched} of ${length}. Success :)`);
       youtubed_tracks.push(track);
     }
     if (fetched === length) {
@@ -207,6 +207,7 @@ mergeYoutubeMetaDataAnd = mergeYoutubeMetaDataAnd(youtube_client);
 const db = firebase.database();
 const top_tracks_monthly_ref = db.ref("toptracks/monthly");
 const top_tracks_weekly_ref = db.ref("toptracks/weekly");
+const top_tracks_quarterly_ref = db.ref("toptracks/quarterly");
 // ref.orderByChild("rank")
 // 	.on("child_changed", (snapshot) => {
 // 		console.log(snapshot.val());
@@ -262,121 +263,15 @@ const setTracksInFirebase = R.curry((ref, tracks) => {
 // 		});
 // 	}
 // };
+const callEveryHour = callEvery("01:00:00");
 
-// const callEverySecond = callEvery('00:00:01');
-
-// callEverySecond(() => {
-// 	ref.push()
-// 		.set({
-// 			hello: "world"
-// 		});
-// });
-
-// {
-// 	"name": "Gemini (feat. George Maple)",
-// 	"duration": "0",
-// 	"playcount": "111",
-// 	"mbid": "",
-// 	"url": "http://www.last.fm/music/What+So+Not/_/Gemini+(feat.+George+Maple)",
-// 	"streamable": {
-// 		"#text": "0",
-// 		"fulltrack": "0"
-// 	},
-// 	"artist": {
-// 		"name": "What So Not",
-// 		"mbid": "e840a9e5-4b73-486a-a47d-790d5096dd1f",
-// 		"url": "http://www.last.fm/music/What+So+Not"
-// 	},
-// 	"image": [{
-// 		"#text": "http://img2-ak.lst.fm/i/u/34s/f74d5dbae628468891f0850f882ccce4.png",
-// 		"size": "small"
-// 	}, {
-// 		"#text": "http://img2-ak.lst.fm/i/u/64s/f74d5dbae628468891f0850f882ccce4.png",
-// 		"size": "medium"
-// 	}, {
-// 		"#text": "http://img2-ak.lst.fm/i/u/174s/f74d5dbae628468891f0850f882ccce4.png",
-// 		"size": "large"
-// 	}, {
-// 		"#text": "http://img2-ak.lst.fm/i/u/300x300/f74d5dbae628468891f0850f882ccce4.png",
-// 		"size": "extralarge"
-// 	}],
-// 	"@attr": {
-// 		"rank": "1"
-// 	}
-// }
-
-// getRecentTracks({
-// 	user: "sidjain26",
-// 	format: "json",
-// 	limit: 5
-// }, logRecentTracks);
-
-// getTopTracks({
-// 	user: "sidjain26",
-// 	format: "json",
-// 	limit: 10,
-// 	page: 1,
-// 	period: "1month"
-// }, uploadTopTracksMonthlyToFirebase)
-
-// getTopArtists({
-// 	user: "sidjain26",
-// 	limit: 10,
-// 	format: "json",
-// 	period: "overall"
-// }, nicelyLog);
-
-// getWeeklyTrackChart({
-// 	user: "sidjain26",
-// 	format: "json",
-// }, R.pipe(getKeyWeeklyTrackChart, R.take(10), R.map(nicelyLog)));
-
-// getWeeklyArtistChart(getParams(), R.pipe(getKeyWeeklyArtistChart, R.take(10), R.map(nicelyLog)));
-
-// getTracksForArtist(getParams({
-// 	artist: "Drake"
-// }), R.pipe(getKeyArtistTracks, R.take(10), R.map(nicelyLog)));
-
-// getUserInfo(getParams(), nicelyLog);
-
-// const timer = callEverySecond(getUserInfo, getParams(), nicelyLog);
-
-//const uniques = array => Array.from(new Set(array));
-//const uniqueTitles = R.compose(R.indexBy(getKey("name")), getTracks);
-
-// const groupByTitle = R.groupBy((track) => {
-// 	const title = getKey("name")(track) + getKey("artist", "#text")(track);
-// 	return title.toLowerCase()
-// 		.replace(/\s/g, "");
-// });
-
-// const req = http.get(queryStr, (res) => {
-// 		let body = '';
-// 		res.on('data', (chunk) => {
-// 			body += chunk;
-// 		});
-// 		res.on('end', () => {
-// 			const response = JSON.parse(body);
-// 			//console.log(getTracks(response));
-// 			R.map(logTitles, R.slice(0, 10, getTracks(response)));
-// 			//console.log(groupByTitle(getTracks(response)));
-// 		});
-// 	})
-// 	.on('error', (e) => {
-// 		console.log(JSON.stringify(e));
-// 	})
-// 	.setTimeout(100, () => {
-// 		req.abort();
-// 		console.log("Timed out");
-// 	});
-
-(() => {
+const main_timer = callEveryHour(() => {
 	getTopTracks(getParams({
 		limit: 10,
 		page: 1,
 		period: "1month"
 	}), (result) => {
-    mergeSpotifyMetaDataAnd(mergeYoutubeMetaDataAnd(setTracksInFirebase(top_tracks_monthly_ref)), TransformTopTracks(result));
+    mergeSpotifyMetaDataAnd(mergeYoutubeMetaDataAnd(setTracksInFirebase(top_tracks_monthly_ref)))(TransformTopTracks(result));
 	});
   getTopTracks(getParams({
     limit: 10,
@@ -385,4 +280,11 @@ const setTracksInFirebase = R.curry((ref, tracks) => {
   }), (result) => {
     mergeSpotifyMetaDataAnd(mergeYoutubeMetaDataAnd(setTracksInFirebase(top_tracks_weekly_ref)))(TransformTopTracks(result));
   });
-})();
+  getTopTracks(getParams({
+    limit: 10,
+    page: 1,
+    period: "3month"
+  }), (result) => {
+    mergeSpotifyMetaDataAnd(mergeYoutubeMetaDataAnd(setTracksInFirebase(top_tracks_quarterly_ref)))(TransformTopTracks(result));
+  });
+});
