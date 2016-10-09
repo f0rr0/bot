@@ -9,225 +9,225 @@ import firebase from 'firebase';
 
 /* API INITIALIZERS */
 
-const getParams = (params) => {
+const getParams = ( params ) => {
   const defaultParams = {
     user: 'sidjain26',
-		format: 'json'
+    format: 'json'
   };
-  return params ? R.merge(defaultParams, params) : defaultParams;
+  return params ? R.merge( defaultParams, params ) : defaultParams;
 };
 
-const spotify_client = (() => {
-  const secrets = jsonfile.readFileSync('./secrets/spotify-config.json');
+const spotify_client = ( () => {
+  const secrets = jsonfile.readFileSync( './secrets/spotify-config.json' );
   const params = {
     authorizationUrl: 'https://accounts.spotify.com/api/token',
     searchResultLimit: 5,
     searchUrl: 'https://api.spotify.com/v1/search',
     timeout: 3000
   };
-  const merged_params = R.merge(secrets, params);
-  return spotifier(merged_params);
-})();
+  const merged_params = R.merge( secrets, params );
+  return spotifier( merged_params );
+} )();
 
-firebase.initializeApp({
+firebase.initializeApp( {
   serviceAccount: './secrets/firebase-config.json',
   databaseURL: 'https://web-bot-e8aee.firebaseio.com'
-});
+} );
 
-const youtube_client = (() => {
-  const secrets = jsonfile.readFileSync('./secrets/youtube-config.json');
-  return youtuber(secrets.api_key);
-})();
+const youtube_client = ( () => {
+  const secrets = jsonfile.readFileSync( './secrets/youtube-config.json' );
+  return youtuber( secrets.api_key );
+} )();
 
 /* LIBRARY FUNCTIONS*/
 
-const callEvery = (duration) => {
-  const delay = moment.duration(duration)
+const callEvery = ( duration ) => {
+  const delay = moment.duration( duration )
    .asMilliseconds();
-  return (fn, ...args) => {
-    return setInterval(fn, delay, ...args);
+  return ( fn, ...args ) => {
+    return setInterval( fn, delay, ...args );
   };
 };
 
-const getKey = (or, path) => {
-  return (obj, transform) => {
-    return R.pathOr(false, path, obj) ? transform ? transform(R.path(path, obj)) : R.path(path, obj) : or;
+const getKey = ( or, path ) => {
+  return ( obj, transform ) => {
+    return R.pathOr( false, path, obj ) ? transform ? transform( R.path( path, obj ) ) : R.path( path, obj ) : or;
   };
 };
 
 /* GETTERS */
 
-const getKeyRecentTracks = getKey([{}], ['recenttracks', 'track']);
-const getKeyTopTracks = getKey([{}], ['toptracks', 'track']);
-const getKeyTopArtists = getKey([{}], ['topartists', 'artist']);
-const getKeyWeeklyTrackChart = getKey([{}], ['weeklytrackchart', 'track']);
-const getKeyWeeklyArtistChart = getKey([{}], ['weeklyartistchart', 'artist']);
-const getKeyArtistTracks = getKey([{}], ['artisttracks', 'track']);
+const getKeyRecentTracks = getKey( [ {} ], [ 'recenttracks', 'track' ] );
+const getKeyTopTracks = getKey( [ {} ], [ 'toptracks', 'track' ] );
+const getKeyTopArtists = getKey( [ {} ], [ 'topartists', 'artist' ] );
+const getKeyWeeklyTrackChart = getKey( [ {} ], [ 'weeklytrackchart', 'track' ] );
+const getKeyWeeklyArtistChart = getKey( [ {} ], [ 'weeklyartistchart', 'artist' ] );
+const getKeyArtistTracks = getKey( [ {} ], [ 'artisttracks', 'track' ] );
 
 /* MANIPULATORS */
 
-const recentTrackInfo = (track) => {
-  const title = getKey(null, ['name'])(track);
-  const artist = getKey(null, ['artist', '#text'])(track);
-  const epoch = getKey(null, ['date', 'uts'])(track);
-  const active = getKey(false, ['@attr', 'nowplaying'])(track) ? true : null;
+const recentTrackInfo = ( track ) => {
+  const title = getKey( null, [ 'name' ] )( track );
+  const artist = getKey( null, [ 'artist', '#text' ] )( track );
+  const epoch = getKey( null, [ 'date', 'uts' ] )( track );
+  const active = getKey( false, [ '@attr', 'nowplaying' ] )( track ) ? true : null;
   return {
-   title,
-   artist,
-   epoch,
-   active
+    title,
+    artist,
+    epoch,
+    active
   };
 };
 
-const topTrackInfo = (track) => {
-	const title = getKey(null, ["name"])(track);
-	const artist = getKey(null, ["artist", "name"])(track);
-	const playcount = getKey(null, ["playcount"])(track);
-	const rank = getKey(null, ["@attr", "rank"])(track);
-	return {
-		title,
-		artist,
-		playcount,
-		rank
-	};
+const topTrackInfo = ( track ) => {
+  const title = getKey( null, [ 'name' ] )( track );
+  const artist = getKey( null, [ 'artist', 'name' ] )( track );
+  const playcount = getKey( null, [ 'playcount' ] )( track );
+  const rank = getKey( null, [ '@attr', 'rank' ] )( track );
+  return {
+    title,
+    artist,
+    playcount,
+    rank
+  };
 };
 
 /* TRANSFORMS */
 
-const transformRecentTracks = R.compose(R.map(recentTrackInfo), getKeyRecentTracks);
+const transformRecentTracks = R.compose( R.map( recentTrackInfo ), getKeyRecentTracks );
 
-const transformTopTracks = R.compose(R.map(topTrackInfo), getKeyTopTracks);
+const transformTopTracks = R.compose( R.map( topTrackInfo ), getKeyTopTracks );
 
-const sortRecentTracks = (tracks) => {
-  const sortByEpoch = R.pipe(R.sortBy(R.prop("epoch")), R.reverse);
-  const findActiveTrack = (track) => {
-    if(R.pathOr(false, ["active"], track)) {
+const sortRecentTracks = ( tracks ) => {
+  const sortByEpoch = R.pipe( R.sortBy( R.prop( 'epoch' ) ), R.reverse );
+  const findActiveTrack = ( track ) => {
+    if ( R.pathOr( false, [ 'active' ], track ) ) {
       return true;
+    } else {
+      return false;
     }
-    else return false;
   };
-  let active_track = R.filter(findActiveTrack, tracks);
-  const sorted_tracks = (() => {
-    const sorted = sortByEpoch(tracks);
-    if (!R.isEmpty(active_track)) {
-      const sorted_without_active = R.dropLast(1, sorted);
-      const sorted_with_active = R.insert(0, R.head(active_track), sorted_without_active);
+  let active_track = R.filter( findActiveTrack, tracks );
+  const sorted_tracks = ( () => {
+    const sorted = sortByEpoch( tracks );
+    if ( !R.isEmpty( active_track ) ) {
+      const sorted_without_active = R.dropLast( 1, sorted );
+      const sorted_with_active = R.insert( 0, R.head( active_track ), sorted_without_active );
       return sorted_with_active;
     }
     return sorted;
-  })();
+  } )();
   return sorted_tracks;
 };
 
 /* CURRYFM HELPERS */
 
-const userApi = curryfm("a3123e138236b93c22e6dafa83e355b0", "user");
-const getRecentTracks = userApi("getRecentTracks");
-const getTopTracks = userApi("getTopTracks");
-const getTopTags = userApi("getTopTags");
-const getUserInfo = userApi("getInfo");
-const getTopArtists = userApi("getTopArtists");
-const getWeeklyArtistChart = userApi("getWeeklyArtistChart");
-const getWeeklyTrackChart = userApi("getWeeklyTrackChart");
-const getTracksForArtist = userApi("getArtistTracks");
-const libraryTest = curryfm("a3123e138236b93c22e6dafa83e355b0", "library", "getArtists");
+const userApi = curryfm( 'a3123e138236b93c22e6dafa83e355b0', 'user' );
+const getRecentTracks = userApi( 'getRecentTracks' );
+const getTopTracks = userApi( 'getTopTracks' );
+const getTopTags = userApi( 'getTopTags' );
+const getUserInfo = userApi( 'getInfo' );
+const getTopArtists = userApi( 'getTopArtists' );
+const getWeeklyArtistChart = userApi( 'getWeeklyArtistChart' );
+const getWeeklyTrackChart = userApi( 'getWeeklyTrackChart' );
+const getTracksForArtist = userApi( 'getArtistTracks' );
+const libraryTest = curryfm( 'a3123e138236b93c22e6dafa83e355b0', 'library', 'getArtists' );
 
 /* SPOTIFY HELPERS */
 
-let getSpotifyMetaData = (client, primaryCallback, secondaryCallback, tracks) => {
-	const length = R.length(tracks);
-	let fetched = 0;
-	let spotified_tracks = [];
+let getSpotifyMetaData = ( client, primaryCallback, secondaryCallback, tracks ) => {
+  const length = R.length( tracks );
+  let fetched = 0;
+  let spotified_tracks = [];
   const min_retries = 3;
   let retries = 0;
-	let getData = (primaryCallback, track) => {
-		const { title, artist } = track;
-		client.findBestMatch({ title, artist }, (err, result) => {
-			if (err) {
-				console.error(track.title, JSON.stringify(err));
-        if (retries < min_retries) {
+  let getData = ( primaryCallback, track ) => {
+    const { title, artist } = track;
+    client.findBestMatch( { title, artist }, ( err, result ) => {
+      if ( err ) {
+        console.error( track.title, JSON.stringify( err ) );
+        if ( retries < min_retries ) {
           retries++;
-          getData(primaryCallback, track);
-        } else if (retries === min_retries) {
+          getData( primaryCallback, track );
+        } else if ( retries === min_retries ) {
           retries = 0;
           fetched++;
-          primaryCallback({}, track, spotified_tracks);
+          primaryCallback( {}, track, spotified_tracks );
         }
-			} else if (result) {
+      } else if ( result ) {
         retries = 0;
         fetched++;
-				const info = extractMetaData(result);
-				primaryCallback(info, track, spotified_tracks);
-			}
-			if (fetched === length) {
-				secondaryCallback(spotified_tracks);
-			}
-		});
-	};
-	getData = R.curry(getData);
-	R.map(getData(primaryCallback), tracks);
+        const info = extractMetaData( result );
+        primaryCallback( info, track, spotified_tracks );
+      }
+      if ( fetched === length ) {
+        secondaryCallback( spotified_tracks );
+      }
+    } );
+  };
+  getData = R.curry( getData );
+  R.map( getData( primaryCallback ), tracks );
 };
 
-getSpotifyMetaData = R.curry(getSpotifyMetaData);
+getSpotifyMetaData = R.curry( getSpotifyMetaData );
 
-const extractMetaData = (result) => {
-	const spotify_id = getKey(undefined, ["id"])(result);
-	const spotify_link = getKey(undefined, ["external_urls", "spotify"])(result);
-	const spotify_embed = `https://embed.spotify.com/?uri=${encodeURIComponent(`spotify:track:${spotify_id}`)}`;
-  const spotify_images = getKey(undefined, ["album", "images"])(result);
+const extractMetaData = ( result ) => {
+  const spotify_id = getKey( undefined, [ 'id' ] )( result );
+  const spotify_link = getKey( undefined, [ 'external_urls', 'spotify' ] )( result );
+  const spotify_embed = `https://embed.spotify.com/?uri=${encodeURIComponent( `spotify:track:${spotify_id}` )}`;
+  const spotify_images = getKey( undefined, [ 'album', 'images' ] )( result );
   return { spotify_embed, spotify_id, spotify_link, spotify_images };
 }
 
-const mergeSpotifyMetaDataToTrack = (info, track, spotified_tracks) => {
+const mergeSpotifyMetaDataToTrack = ( info, track, spotified_tracks ) => {
   const spotified_track = {
     ...track,
     ...info
   };
-  spotified_tracks.push(spotified_track);
+  spotified_tracks.push( spotified_track );
 }
 
-const mergeSpotifyMetaDataAnd = getSpotifyMetaData(spotify_client, mergeSpotifyMetaDataToTrack);
+const mergeSpotifyMetaDataAnd = getSpotifyMetaData( spotify_client, mergeSpotifyMetaDataToTrack );
 
 /* YOUTUBE HELPERS */
 
-let mergeYoutubeMetaDataAnd = R.curry((client, secondaryCallback, tracks) => {
-  const length = R.length(tracks);
+let mergeYoutubeMetaDataAnd = R.curry( ( client, secondaryCallback, tracks ) => {
+  const length = R.length( tracks );
   let fetched = 0;
   let youtubed_tracks = [];
   const min_retries = 3;
   let retries = 0;
-  let pushToTracks = (track, err) => {
-    if(err) {
-      console.error(track.title, JSON.stringify(err, null, 1));
-      if (retries < min_retries) {
+  let pushToTracks = ( track, err ) => {
+    if ( err ) {
+      console.error( track.title, JSON.stringify( err, null, 1 ) );
+      if ( retries < min_retries ) {
         retries++;
-        client(pushToTracks, track);
-      } else if (retries === min_retries) {
+        client( pushToTracks, track );
+      } else if ( retries === min_retries ) {
         retries = 0;
         fetched++;
-        youtubed_tracks.push(track);
+        youtubed_tracks.push( track );
       }
-    }
-    else if (track) {
+    } else if ( track ) {
       retries = 0;
       fetched++;
-      youtubed_tracks.push(track);
+      youtubed_tracks.push( track );
     }
-    if (fetched === length) {
-      secondaryCallback(youtubed_tracks);
+    if ( fetched === length ) {
+      secondaryCallback( youtubed_tracks );
     }
   };
-  R.map(client(pushToTracks), tracks);
-});
-mergeYoutubeMetaDataAnd = mergeYoutubeMetaDataAnd(youtube_client);
+  R.map( client( pushToTracks ), tracks );
+} );
+mergeYoutubeMetaDataAnd = mergeYoutubeMetaDataAnd( youtube_client );
 
 /* FIREBASE HELPERS */
 
 const db = firebase.database();
-const top_tracks_monthly_ref = db.ref("toptracks/monthly");
-const top_tracks_weekly_ref = db.ref("toptracks/weekly");
-const top_tracks_quarterly_ref = db.ref("toptracks/quarterly");
-const recent_tracks_ref = db.ref("recenttracks");
+const top_tracks_monthly_ref = db.ref( 'toptracks/monthly' );
+const top_tracks_weekly_ref = db.ref( 'toptracks/weekly' );
+const top_tracks_quarterly_ref = db.ref( 'toptracks/quarterly' );
+const recent_tracks_ref = db.ref( 'recenttracks' );
 // ref.orderByChild("rank")
 // 	.on("child_changed", (snapshot) => {
 // 		console.log(snapshot.val());
@@ -235,9 +235,9 @@ const recent_tracks_ref = db.ref("recenttracks");
 // 		console.log(err.code);
 // 	});
 
-const setTracksInFirebase = R.curry((ref, tracks) => {
-	ref.set(tracks);
-});
+const setTracksInFirebase = R.curry( ( ref, tracks ) => {
+  ref.set( tracks );
+} );
 
 /* TESTING */
 
@@ -283,37 +283,37 @@ const setTracksInFirebase = R.curry((ref, tracks) => {
 // 		});
 // 	}
 // };
-const callEveryTwoHours = callEvery("02:00:00");
-const callEveryFiveSeconds = callEvery("00:00:05");
+const callEveryTwoHours = callEvery( '02:00:00' );
+const callEveryFiveSeconds = callEvery( '00:00:05' );
 
-const recenttracks_timer = callEveryFiveSeconds(() => {
-  getRecentTracks(getParams({
+const recenttracks_timer = callEveryFiveSeconds( () => {
+  getRecentTracks( getParams( {
     limit: 5
-  }), (result) => {
-    mergeSpotifyMetaDataAnd(mergeYoutubeMetaDataAnd(R.pipe(sortRecentTracks, setTracksInFirebase(recent_tracks_ref))))(transformRecentTracks(result));
-  })
-});
+  } ), ( result ) => {
+    mergeSpotifyMetaDataAnd( mergeYoutubeMetaDataAnd( R.pipe( sortRecentTracks, setTracksInFirebase( recent_tracks_ref ) ) ) )( transformRecentTracks( result ) );
+  } )
+} );
 
-const toptracks_timer = callEveryTwoHours(() => {
-	getTopTracks(getParams({
-		limit: 10,
-		page: 1,
-		period: "1month"
-	}), (result) => {
-    mergeSpotifyMetaDataAnd(mergeYoutubeMetaDataAnd(setTracksInFirebase(top_tracks_monthly_ref)))(transformTopTracks(result));
-	});
-  getTopTracks(getParams({
+const toptracks_timer = callEveryTwoHours( () => {
+  getTopTracks( getParams( {
     limit: 10,
     page: 1,
-    period: "7day"
-  }), (result) => {
-    mergeSpotifyMetaDataAnd(mergeYoutubeMetaDataAnd(setTracksInFirebase(top_tracks_weekly_ref)))(transformTopTracks(result));
-  });
-  getTopTracks(getParams({
+    period: '1month'
+  } ), ( result ) => {
+    mergeSpotifyMetaDataAnd( mergeYoutubeMetaDataAnd( setTracksInFirebase( top_tracks_monthly_ref ) ) )( transformTopTracks( result ) );
+  } );
+  getTopTracks( getParams( {
     limit: 10,
     page: 1,
-    period: "3month"
-  }), (result) => {
-    mergeSpotifyMetaDataAnd(mergeYoutubeMetaDataAnd(setTracksInFirebase(top_tracks_quarterly_ref)))(transformTopTracks(result));
-  });
-});
+    period: '7day'
+  } ), ( result ) => {
+    mergeSpotifyMetaDataAnd( mergeYoutubeMetaDataAnd( setTracksInFirebase( top_tracks_weekly_ref ) ) )( transformTopTracks( result ) );
+  } );
+  getTopTracks( getParams( {
+    limit: 10,
+    page: 1,
+    period: '3month'
+  } ), ( result ) => {
+    mergeSpotifyMetaDataAnd( mergeYoutubeMetaDataAnd( setTracksInFirebase( top_tracks_quarterly_ref ) ) )( transformTopTracks( result ) );
+  } );
+} );
